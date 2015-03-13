@@ -1,7 +1,7 @@
 \documentclass[11pt]{article}
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{1em}
-\usepackage[a4paper, margin=3cm]{geometry}
+\setlength{\parskip}{0.5em}
+\usepackage[a4paper, margin=2.7cm]{geometry}
 \usepackage{graphicx}
 \usepackage{float}
 
@@ -12,98 +12,149 @@
 \maketitle
 \newpage
 
-\section{Assumptions}
-In this coursework I propose a potential solution to the problem
-by utilising Resilient Distributed Datasets (RDDs). Through this
-report I ake the following assumptions into account:
-\begin{itemize}
-\item The stream of data (network traffic) is infinite and 
-will continually have more things coming in. There is no point
-at which traffic halts.
-\item Malicious signatures, although fixed-length are not all of
-the same length and may be any number of bytes long, however,
-these lengths are known.
-\item If there was a file that could hold all of the Malicious
-signatures the company checks for, this file will of a size
-that allows it to be stored in memory, not on disk.
-\item Malicious signatures can be hashed and the amount of
-signatures is such that there are no hash collisions.
-\item The running total of Malicious signatures detected must at
-every time be correct and operates as an eventually correct 
-system. Our boss can read the total number of times the patterns
-were observed at any time and they are guaranteed to be correct
-or LESS than the actual amount of observed instances. 
-\item th
-\item Blissful ignorance of fault tolerant-design
-\item I extend this fault tolerance toward communication as well
-so all messages are guaranteed to reach their destinations.
-\item Based on the CAP theorem, since we are choosing to 
-tiptoe over Availability, the system created should be able
-to satisfy the other two properties: Consistency and Partition.
-\end{itemize}
-
-
 \section{Graphical Design}
+\begin{figure}[H]
+\centering
+\includegraphics[scale=0.125]{pics/SDSD.jpg}
+\end{figure}
 
 \section{Description of Design}
-In my design, I have made a single centralised master node which
-will handle the incoming network traffic. The node will split the
-data into chunks. Chunks will then be sent to multiple worker
-nodes in a Map Reduce style except it is done with RDDs. A simple
-1-to-1 map of certain lengths of the incoming data will be used
-to create the RDDS onto ther worker nodes. We use RDDS because
-we do not want the processing the stream to fall exponentially
-behind in terms of real time processing which would be the case
-in map reduce since things are stored to disk. We want to keep
-everything in memory and save the I/O save and load time.
+In my design, I have a single centralised master node which
+handles incoming network traffic. The node splits the
+data into chunks which are sent to worker
+nodes in a Map Reduce style except the data is sent with a task
+in the style of the Resilient Distributed Datasets (RDD) model. This
+will be done with a simple map function that performs an Identity 
+function on a certain part of the data stream.
+
+The worker nodes are other machines in the data centre. Each will
+have a copy of the malicious signatures file (MSF) and store them in RAM.  
+The worker will perform simple string matching against the 
+malicious signatures, incrementing a local count of each within the
+machine. These counts are stored as key value pairs, akin to map
+reduce, with the malicious signatures being keys and
+also being hashed. The hash function is the same across all the
+machines in the data centre. The values are a SET of byte offsets
+where the signatures start. The count of times the signatures were
+seen is simply the length of this set and should contain no duplicates.
+
+Some worker nodes are assigned the role of just reducing the incoming
+data from other worker nodes, they will make up the reduce step which
+will agglomerate the local counts of other work nodes to obtain the total
+global count of seen malicious signatures on the master node for a certain
+time point.
 
 The master will then receive the returned work from the other 
 nodes within the data centre(s) through reductions with maps,
 filters and joins. The master also periodically sends the current
 update count value of each malicious string to all the nodes
-so that any can be queried and will all return a consistent
-value. This value may not be the exact correct count at the time
-of the query but it will not be wrong, just not up to date. 
+so that any can be queried and all return a consistent
+value. (Master 2 mentioned later).
 
-The worker nodes are other machines in the data centre. Each will
-have a copy of the Malicious byte signatures stored in memory. 
-The incoming work load will perform simple string matching 
-against each signature, incrementing a count (in memory)
-on the local memory of the machine. These counts are stored
-as key value paris with the Malicious signatures being keys and
-also being hashed. After processing the part of
-the stream it has been given, the worker will send off the
-counts to be reduced (summed). The local memory is then cleared
-for the next batch. 
+The workers and master can be queried for the current total(global) count of
+malicious signatures detected as they all have a local copy.  To accommodate 
+a "running" count, queried  workers can add their current counts to the 
+locally saved global count. However this would cause differing reads 
+depending on which worker is queried, although all of the reads are correct, 
+they won't be consistent. As a result I think it's best to stick with 
+returning the saved global count (same as master node). This preserves the 
+Consistency property of CAP. Even if there is a network partitioning, if we 
+consider failures, the Partitioning property is also held because each node
+has a copy of the count and set of offsets.
 
-The workers and master can be queried for the current count of
-Malicious signatues detected as they will have a local copy
-which is either kept in memory due to size constraints or
-just kept on disk. Hopefully the queries will not be too 
-frequent. To accommodate a "running" count. Queried workers can
-add their current counts to the currently saved global count. 
-However this would cause differing reads depending on worker 
-queried although all of the reads are correct they won't be
-consistent and won't be used if we chase the two aformentioned
-CAP properties we could preserve. 
+\section{Design Assumptions and Considerations}
+\begin{itemize}
+\itemsep0em 
+\item Although the system is essentially Map Reduce, we use RDDs because
+we don't want processing to fall exponentially
+behind input. As Map Reduce stores to disk, it won't do. 
+We want to keep everything in RAM avoid I/O overheads.
+\item Malicious signatures, although fixed-length are not all of
+the same length.
+\item The file containing the list of malicious
+signatures the company checks for is small enough to be
+stored in memory, not on disk.
+\item Malicious signatures can be hashed and are such that there are no collisions.
+\item The running total of malicious signatures detected must, at
+every time, be correct and operates as an eventually correct 
+system. The counts are guaranteed to be correct
+or LESS than the actual amount of observed instances. 
+\item Blissful ignorance of fault tolerant-design (system halts if node 
+fails)extended to
+communication as well, so all messages are guaranteed to reach their 
+destinations.
+\item Based on the CAP theorem, since we are choosing to 
+tiptoe over Availability, the system created should be able
+to satisfy the other two properties: Consistency and Partition.
+\end{itemize}
 
 \section{Parallelised work}
 My design allows parallelised work as the network traffic is 
 split into chunks (some of the the traffic is duplicated to 
-account for possibilities of signatures lyring across
-partitions). These chunks are sent to worker nodes and processed
-in memory which is both fast and is doing work across multiple
-worker machines. My design can allow parallelism up to a
+account for possibilities of signatures lying across
+chunks). The chunks are dealt with by the worker nodes in parallel. 
+As a result, my design can allow parallelism up to a
 certain degree which is bound by the size of the longest
-Malicious signature size, anything else would be sub optimal and
-require more comparisons across data partitions which would
+malicious signature size. A chunk size of less than this would be sub 
+optimal and require more comparisons across chunks which would
 increase the duplication of the data and amount of work to be 
 done.
 
 \section{Scalability}
-With a data centre of commodity machines, horizontal scaling 
-should not be an issue. The work is considerably infinite and
-all that needs to be done is shifting more of the partitioned
-data sets, generated from a simple map function will 
+With a data centre of commodity machines, incremental, horizontal scaling 
+should not be an issue. When the workload becomes larger, it
+will be easy to add more machines, just like it is in Map Reduce. Since
+these will all have RDDs on them, the computation is very fast and reduce 
+steps can also be done quickly. A potential problem here is the
+communication cost, as more workers get added to accommodate the
+increasing traffic (from 100Gbps) , the communication 
+overhead can increase as the system will only be as fast as its slowest 
+link, more messages also have to be sent (containing global counts). 
+However, having global counts makes querying the system fast and good if
+the query is called often and machines are in data centres spread 
+throughout the world. 
+
+\section{Additional Considerations}
+Though I outlined earlier my design assumptions and considerations, 
+I would like to address some of them here. 
+\begin{itemize}
+\item Since we are using RDDs, the system is already quite fault tolerant
+due to the nature of its bulk writes.
+\item In addition, RDD is good for coarse grained transforms, which is
+what we will be doing to the input data, we are simply taking some part
+of the incoming traffic. 
+\item Using the RDD model will allow the running of back up copies of slow 
+tasks just like Map Reduce to reduce the impact of stragglers.
+\item As a result, even if the memory is only large enough to hold the MSF
+in my design, this method will only be as slow as Map Reduce due to spilling 
+over into disk.
+\item If there is a failure by a worker node, all that has to be done is
+to rerun the same task given to that worker upon recovery or upon another
+node.
+\item MASTER 2 in my diagram is there to account for the case where we 
+consider fault tolerance and failures in the network. This design could
+be extended further to include several masters (not limited to 2) which 
+receive chunked parts
+of input and then are in charge of their own mini-clusters. Each will 
+receive the global count at the end, just like the central master right now.
+In my original design, the one point of failure would be the centralised
+master. If that goes down the whole thing stops. However, using RDDs, we may
+be able to reconstruct data due to stroing lineage. Having multiple
+master nodes will increase the chance of failure but there will be another
+master that can take up the failed master's job and be in charge of its
+cluster until it recovers (if it does). Since all the masters will have a 
+global count and set of offsets, they can continue operations and just 
+continue adding to and incrementing this. 
+\item I was very unsure about the byte offsets and how these would be 
+stored. I was considering using some method of splitting the data based on
+time and using time stamps. Thus, using a combination of timestamp and 
+offset, it would be possibly easier to store offsets rather than saving
+large exponents and mantissas. However this would require some kind of 
+global clock to synchronise in the case of multiple master nodes. As we
+know, this would be quite difficult in a distributed system and may 
+require vector clocks or Google's TrueTime. If
+there was one master, then the time splitting should be consistent.
+ 
+\end{itemize}
 
 \end{document}
