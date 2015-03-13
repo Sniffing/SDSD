@@ -12,14 +12,98 @@
 \maketitle
 \newpage
 
+\section{Assumptions}
+In this coursework I propose a potential solution to the problem
+by utilising Resilient Distributed Datasets (RDDs). Through this
+report I ake the following assumptions into account:
+\begin{itemize}
+\item The stream of data (network traffic) is infinite and 
+will continually have more things coming in. There is no point
+at which traffic halts.
+\item Malicious signatures, although fixed-length are not all of
+the same length and may be any number of bytes long, however,
+these lengths are known.
+\item If there was a file that could hold all of the Malicious
+signatures the company checks for, this file will of a size
+that allows it to be stored in memory, not on disk.
+\item Malicious signatures can be hashed and the amount of
+signatures is such that there are no hash collisions.
+\item The running total of Malicious signatures detected must at
+every time be correct and operates as an eventually correct 
+system. Our boss can read the total number of times the patterns
+were observed at any time and they are guaranteed to be correct
+or LESS than the actual amount of observed instances. 
+\item th
+\item Blissful ignorance of fault tolerant-design
+\item I extend this fault tolerance toward communication as well
+so all messages are guaranteed to reach their destinations.
+\item Based on the CAP theorem, since we are choosing to 
+tiptoe over Availability, the system created should be able
+to satisfy the other two properties: Consistency and Partition.
+\end{itemize}
+
+
 \section{Graphical Design}
 
 \section{Description of Design}
+In my design, I have made a single centralised master node which
+will handle the incoming network traffic. The node will split the
+data into chunks. Chunks will then be sent to multiple worker
+nodes in a Map Reduce style except it is done with RDDs. A simple
+1-to-1 map of certain lengths of the incoming data will be used
+to create the RDDS onto ther worker nodes. We use RDDS because
+we do not want the processing the stream to fall exponentially
+behind in terms of real time processing which would be the case
+in map reduce since things are stored to disk. We want to keep
+everything in memory and save the I/O save and load time.
 
+The master will then receive the returned work from the other 
+nodes within the data centre(s) through reductions with maps,
+filters and joins. The master also periodically sends the current
+update count value of each malicious string to all the nodes
+so that any can be queried and will all return a consistent
+value. This value may not be the exact correct count at the time
+of the query but it will not be wrong, just not up to date. 
+
+The worker nodes are other machines in the data centre. Each will
+have a copy of the Malicious byte signatures stored in memory. 
+The incoming work load will perform simple string matching 
+against each signature, incrementing a count (in memory)
+on the local memory of the machine. These counts are stored
+as key value paris with the Malicious signatures being keys and
+also being hashed. After processing the part of
+the stream it has been given, the worker will send off the
+counts to be reduced (summed). The local memory is then cleared
+for the next batch. 
+
+The workers and master can be queried for the current count of
+Malicious signatues detected as they will have a local copy
+which is either kept in memory due to size constraints or
+just kept on disk. Hopefully the queries will not be too 
+frequent. To accommodate a "running" count. Queried workers can
+add their current counts to the currently saved global count. 
+However this would cause differing reads depending on worker 
+queried although all of the reads are correct they won't be
+consistent and won't be used if we chase the two aformentioned
+CAP properties we could preserve. 
 
 \section{Parallelised work}
+My design allows parallelised work as the network traffic is 
+split into chunks (some of the the traffic is duplicated to 
+account for possibilities of signatures lyring across
+partitions). These chunks are sent to worker nodes and processed
+in memory which is both fast and is doing work across multiple
+worker machines. My design can allow parallelism up to a
+certain degree which is bound by the size of the longest
+Malicious signature size, anything else would be sub optimal and
+require more comparisons across data partitions which would
+increase the duplication of the data and amount of work to be 
+done.
 
 \section{Scalability}
-
+With a data centre of commodity machines, horizontal scaling 
+should not be an issue. The work is considerably infinite and
+all that needs to be done is shifting more of the partitioned
+data sets, generated from a simple map function will 
 
 \end{document}
